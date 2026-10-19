@@ -1,0 +1,194 @@
+openapi: 3.0.3
+info:
+  title: API Interna de Gestão de Estoque e Produtos (Stock-Service)
+  version: 1.0.0
+  description: >
+    API interna consumida pelo OrderController para verificação e reserva atômica
+    de produtos durante o checkout.
+servers:
+  - url: http://127.0.0.1:4011
+    description: Servidor Mock Local (Prism na porta 4011 - porta distinta da API de Pedidos, que usa 4010)
+  - url: https://api.marketrest.com
+    description: Servidor de Produção (o prefixo /v1 já faz parte do path da operação)
+paths:
+  /v1/estoque/reservar:
+    post:
+      summary: Realiza reserva temporária de estoque para um pedido
+      description: >
+        Operação atômica executada durante a finalização do pedido.
+        Bloqueia a quantidade solicitada por um tempo determinado (TTL).
+      operationId: reservarEstoque
+      parameters:
+        - name: Prefer
+          in: header
+          required: false
+          description: "Instrui o Mock Server (Prism) a retornar um código HTTP específico para simulação."
+          schema:
+            type: string
+            enum:
+              - "code=200"
+              - "code=400"
+              - "code=422"
+              - "code=500"
+            default: "code=200"
+            example: "code=422"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReservaEstoqueInput'
+            examples:
+              reservaValida:
+                summary: Reserva com saldo suficiente
+                value:
+                  pedidoReferenciaId: "temp-ped-9821"
+                  itens:
+                    - produtoId: "prod-102"
+                      quantidade: 2
+              reservaSaldoInsuficiente:
+                summary: Reserva acima do saldo disponível
+                value:
+                  pedidoReferenciaId: "temp-ped-9822"
+                  itens:
+                    - produtoId: "prod-102"
+                      quantidade: 10
+      responses:
+        '200':
+          description: Reserva de estoque efetuada com sucesso.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReservaEstoqueResponse'
+              example:
+                reservaId: "res-9812"
+                status: "RESERVADO"
+                tempoExpiracaoSegundos: 900
+                dataCriacao: "2026-10-17T14:32:00Z"
+        '400':
+          description: Erro de validação de sintaxe, formato JSON inválido ou campos obrigatórios ausentes.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+              example:
+                type: "https://api.marketrest.com/erros/schema-invalido"
+                title: "Requisição Inválida"
+                status: 400
+                detail: "O campo 'itens[0].quantidade' deve ser maior ou igual a 1."
+                instance: "/v1/estoque/reservar"
+        '422':
+          description: Saldo insuficiente para um ou mais itens.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/FalhaReservaProblemDetails'
+              example:
+                type: "https://api.marketrest.com/erros/estoque-insuficiente"
+                title: "Saldo de Estoque Insuficiente"
+                status: 422
+                detail: "Saldo insuficiente para um ou mais itens."
+                instance: "/v1/estoque/reservar"
+                itensIndisponiveis:
+                  - produtoId: "prod-102"
+                    solicitado: 10
+                    disponivel: 2
+        '500':
+          description: Erro interno no banco de dados de estoque.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+              example:
+                type: "https://api.marketrest.com/erros/erro-interno"
+                title: "Erro Interno"
+                status: 500
+                detail: "Falha ao acessar o banco de dados de estoque."
+                instance: "/v1/estoque/reservar"
+
+components:
+  schemas:
+    ReservaEstoqueInput:
+      type: object
+      required:
+        - pedidoReferenciaId
+        - itens
+      properties:
+        pedidoReferenciaId:
+          type: string
+          example: "temp-ped-9821"
+        itens:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required:
+              - produtoId
+              - quantidade
+            properties:
+              produtoId:
+                type: string
+                example: "prod-102"
+              quantidade:
+                type: integer
+                minimum: 1
+                example: 2
+
+    ReservaEstoqueResponse:
+      type: object
+      properties:
+        reservaId:
+          type: string
+          example: "res-9812"
+        status:
+          type: string
+          enum: [RESERVADO, EXPIRADO, CANCELADO]
+          example: "RESERVADO"
+        tempoExpiracaoSegundos:
+          type: integer
+          example: 900
+        dataCriacao:
+          type: string
+          format: date-time
+          example: "2026-10-17T14:32:00Z"
+
+    ProblemDetails:
+      type: object
+      description: Padrão RFC 7807 para representação padronizada de erros em APIs HTTP.
+      required:
+        - type
+        - title
+        - status
+        - detail
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string
+
+    FalhaReservaProblemDetails:
+      allOf:
+        - $ref: '#/components/schemas/ProblemDetails'
+        - type: object
+          properties:
+            itensIndisponiveis:
+              type: array
+              items:
+                type: object
+                properties:
+                  produtoId:
+                    type: string
+                    example: "prod-102"
+                  solicitado:
+                    type: integer
+                    example: 10
+                  disponivel:
+                    type: integer
+                    example: 2

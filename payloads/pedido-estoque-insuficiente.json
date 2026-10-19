@@ -1,0 +1,11 @@
+{
+  "clienteId": "e2a3c7e4-6a8b-4c2d-98e1-5bc31c38fa22",
+  "formaPagamento": "PIX",
+  "itens": [
+    {
+      "produtoId": "prod-102",
+      "quantidade": 10,
+      "precoUnitario": 49.90
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "type": "https://api.marketrest.com/erros/erro-interno",
+  "title": "Erro Interno",
+  "status": 500,
+  "detail": "Falha ao acessar o banco de dados de estoque.",
+  "instance": "/v1/estoque/reservar"
+}

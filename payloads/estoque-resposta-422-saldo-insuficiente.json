@@ -1,0 +1,14 @@
+{
+  "type": "https://api.marketrest.com/erros/estoque-insuficiente",
+  "title": "Saldo de Estoque Insuficiente",
+  "status": 422,
+  "detail": "Saldo insuficiente para um ou mais itens.",
+  "instance": "/v1/estoque/reservar",
+  "itensIndisponiveis": [
+    {
+      "produtoId": "prod-102",
+      "solicitado": 10,
+      "disponivel": 2
+    }
+  ]
+}

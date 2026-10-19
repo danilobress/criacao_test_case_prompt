@@ -1,0 +1,7 @@
+{
+  "type": "https://api.marketrest.com/erros/gateway-timeout",
+  "title": "Gateway Timeout",
+  "status": 504,
+  "detail": "O serviço de gestão de estoque demorou mais que o limite tolerado para responder. Transação abortada com segurança.",
+  "instance": "/pedidos"
+}

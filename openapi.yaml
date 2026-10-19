@@ -1,0 +1,293 @@
+openapi: 3.0.3
+info:
+  title: API de Checkout e Pedidos (Market-Rest)
+  version: 1.0.0
+  description: >
+    API responsável pela criação e orquestração de pedidos com validação de estoque
+    integrada (cenário OrderController <-> Stock API) para simulações e testes no Fórum de Pós-Graduação.
+servers:
+  - url: http://127.0.0.1:4010
+    description: Servidor Mock Local (Prism na porta 4010)
+  - url: https://api.marketrest.com/v1
+    description: Servidor de Produção
+
+paths:
+  /pedidos:
+    post:
+      summary: Cria e finaliza um novo pedido
+      description: >
+        Recebe os dados do carrinho, valida sintaxe, verifica e reserva o estoque
+        de forma atômica no serviço de produtos/estoque, persistindo o pedido.
+      operationId: criarPedido
+      parameters:
+        - name: X-Idempotency-Key
+          in: header
+          required: false
+          description: Chave única de idempotência (UUID v4) para evitar duplicidade de pedidos em retries de rede.
+          schema:
+            type: string
+            format: uuid
+            example: "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d"
+        - name: Prefer
+          in: header
+          required: false
+          description: "Instrui o Mock Server (Prism) a retornar um código HTTP específico para simulação."
+          schema:
+            type: string
+            enum:
+              - "code=201"
+              - "code=400"
+              - "code=422"
+              - "code=503"
+              - "code=504"
+            default: "code=201"
+            example: "code=422"
+      requestBody:
+        required: true
+        description: Dados necessários para criação e reserva do pedido.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CriarPedidoRequest'
+            examples:
+              pedidoValido:
+                summary: Pedido Válido com estoque suficiente
+                value:
+                  clienteId: "e2a3c7e4-6a8b-4c2d-98e1-5bc31c38fa22"
+                  formaPagamento: "PIX"
+                  itens:
+                    - produtoId: "prod-102"
+                      quantidade: 2
+                      precoUnitario: 49.90
+              pedidoEstoqueInsuficiente:
+                summary: Tentativa de compra acima do saldo em estoque
+                value:
+                  clienteId: "e2a3c7e4-6a8b-4c2d-98e1-5bc31c38fa22"
+                  formaPagamento: "PIX"
+                  itens:
+                    - produtoId: "prod-102"
+                      quantidade: 10
+                      precoUnitario: 49.90
+      responses:
+        '201':
+          description: Pedido criado com sucesso e itens reservados temporariamente no estoque.
+          headers:
+            Location:
+              description: URI para consulta do pedido recém-criado.
+              schema:
+                type: string
+                example: "/pedidos/ped-2026-78912"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PedidoResponse'
+              example:
+                id: "ped-2026-78912"
+                status: "AGUARDANDO_PAGAMENTO"
+                total: 99.80
+                dataCriacao: "2026-10-17T14:32:00Z"
+                reservaEstoqueId: "res-9812"
+                itens:
+                  - produtoId: "prod-102"
+                    quantidade: 2
+                    precoUnitario: 49.90
+                    subtotal: 99.80
+        '400':
+          description: Erro de validação de sintaxe, formato JSON inválido ou campos obrigatórios ausentes.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+              example:
+                type: "https://api.marketrest.com/erros/schema-invalido"
+                title: "Requisição Inválida"
+                status: 400
+                detail: "O campo 'itens[0].quantidade' deve ser maior ou igual a 1."
+                instance: "/pedidos"
+        '422':
+          description: "Erro de regra de negócio semântica (ex: Saldo de estoque insuficiente para um ou mais produtos)."
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/EstoqueInsuficienteProblemDetails'
+              example:
+                type: "https://api.marketrest.com/erros/estoque-insuficiente"
+                title: "Saldo de Estoque Insuficiente"
+                status: 422
+                detail: "Não foi possível reservar os produtos solicitados devido a estoque esgotado ou insuficiente."
+                instance: "/pedidos"
+                itensIndisponiveis:
+                  - produtoId: "prod-102"
+                    solicitado: 10
+                    disponivel: 2
+        '503':
+          description: "Serviço de estoque indisponível ou Circuit Breaker acionado."
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+              example:
+                type: "https://api.marketrest.com/erros/servico-indisponivel"
+                title: "Serviço Indisponível"
+                status: 503
+                detail: "O serviço de gestão de estoque está temporariamente inacessível. O Circuit Breaker foi acionado para proteção do sistema."
+                instance: "/pedidos"
+        '504':
+          description: "Tempo limite esgotado ao aguardar resposta do serviço de estoque (Timeout de Gateway)."
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+              example:
+                type: "https://api.marketrest.com/erros/gateway-timeout"
+                title: "Gateway Timeout"
+                status: 504
+                detail: "O serviço de gestão de estoque demorou mais que o limite tolerado para responder. Transação abortada com segurança."
+                instance: "/pedidos"
+
+components:
+  schemas:
+    CriarPedidoRequest:
+      type: object
+      required:
+        - clienteId
+        - itens
+        - formaPagamento
+      properties:
+        clienteId:
+          type: string
+          format: uuid
+          description: Identificador único do cliente solicitante.
+          example: "e2a3c7e4-6a8b-4c2d-98e1-5bc31c38fa22"
+        formaPagamento:
+          type: string
+          enum: [PIX, CARTAO_CREDITO, BOLETO]
+          description: Forma de pagamento selecionada no checkout.
+          example: "PIX"
+        itens:
+          type: array
+          minItems: 1
+          description: Lista de itens que compõem o pedido. Deve conter pelo menos 1 item.
+          items:
+            $ref: '#/components/schemas/ItemPedidoInput'
+
+    ItemPedidoInput:
+      type: object
+      required:
+        - produtoId
+        - quantidade
+        - precoUnitario
+      properties:
+        produtoId:
+          type: string
+          description: Identificador do produto no catálogo/estoque.
+          example: "prod-102"
+        quantidade:
+          type: integer
+          minimum: 1
+          description: Quantidade solicitada do produto (mínimo 1).
+          example: 2
+        precoUnitario:
+          type: number
+          format: float
+          minimum: 0.01
+          description: Preço unitário no momento da inclusão no pedido.
+          example: 49.90
+
+    ItemPedidoOutput:
+      type: object
+      properties:
+        produtoId:
+          type: string
+          example: "prod-102"
+        quantidade:
+          type: integer
+          example: 2
+        precoUnitario:
+          type: number
+          format: float
+          example: 49.90
+        subtotal:
+          type: number
+          format: float
+          example: 99.80
+
+    PedidoResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Identificador único do pedido gerado.
+          example: "ped-2026-78912"
+        status:
+          type: string
+          enum: [AGUARDANDO_PAGAMENTO, CANCELADO, CONFIRMADO]
+          example: "AGUARDANDO_PAGAMENTO"
+        total:
+          type: number
+          format: float
+          example: 99.80
+        dataCriacao:
+          type: string
+          format: date-time
+          example: "2026-10-17T14:32:00Z"
+        reservaEstoqueId:
+          type: string
+          description: Token identificador da reserva temporária realizada no serviço de estoque.
+          example: "res-9812"
+        itens:
+          type: array
+          items:
+            $ref: '#/components/schemas/ItemPedidoOutput'
+
+    ProblemDetails:
+      type: object
+      description: Padrão RFC 7807 para representação padronizada de erros em APIs HTTP.
+      required:
+        - type
+        - title
+        - status
+        - detail
+      properties:
+        type:
+          type: string
+          format: uri
+          description: URI de referência para documentação do tipo de erro.
+          example: "https://api.marketrest.com/erros/schema-invalido"
+        title:
+          type: string
+          description: Resumo curto e legível do erro.
+          example: "Requisição Inválida"
+        status:
+          type: integer
+          description: Código de status HTTP retornado.
+          example: 400
+        detail:
+          type: string
+          description: Explicação detalhada da ocorrência específica do erro.
+          example: "O campo 'itens[0].quantidade' deve ser maior que zero."
+        instance:
+          type: string
+          description: URI que identifica a ocorrência do erro.
+          example: "/pedidos"
+
+    EstoqueInsuficienteProblemDetails:
+      allOf:
+        - $ref: '#/components/schemas/ProblemDetails'
+        - type: object
+          properties:
+            itensIndisponiveis:
+              type: array
+              description: Lista de itens que não possuem saldo suficiente no estoque.
+              items:
+                type: object
+                properties:
+                  produtoId:
+                    type: string
+                    example: "prod-102"
+                  solicitado:
+                    type: integer
+                    example: 10
+                  disponivel:
+                    type: integer
+                    example: 2

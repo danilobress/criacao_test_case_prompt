@@ -1,0 +1,7 @@
+{
+  "type": "https://api.marketrest.com/erros/servico-indisponivel",
+  "title": "Serviço Indisponível",
+  "status": 503,
+  "detail": "O serviço de gestão de estoque está temporariamente inacessível. O Circuit Breaker foi acionado para proteção do sistema.",
+  "instance": "/pedidos"
+}

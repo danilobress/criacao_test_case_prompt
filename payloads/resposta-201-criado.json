@@ -1,0 +1,15 @@
+{
+  "id": "ped-2026-78912",
+  "status": "AGUARDANDO_PAGAMENTO",
+  "total": 99.80,
+  "dataCriacao": "2026-10-17T14:32:00Z",
+  "reservaEstoqueId": "res-9812",
+  "itens": [
+    {
+      "produtoId": "prod-102",
+      "quantidade": 2,
+      "precoUnitario": 49.90,
+      "subtotal": 99.80
+    }
+  ]
+}
